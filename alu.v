@@ -3,7 +3,7 @@
 // Company: 
 // Engineer: 
 // 
-// Create Date: 04/22/2025 07:29:36 PM
+// Create Date: 05/30/2025 12:35:41 PM
 // Design Name: 
 // Module Name: alu
 // Project Name: 
@@ -20,6 +20,53 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 
+module alu (
+    input [31:0] a, b,                // Operands (32-bit by default)
+    input [2:0] ALUControl,           // Selects ALU operation
+    output reg [31:0] Result,         // Result of ALU operation
+    output Zero,                      // 1 if Result is zero
+    input funct7bit6,                 // Used to distinguish SRL vs SRA
+    input funct3_bit                  // Used to distinguish SLT vs SLTU
+);
+
+
+always @(*) begin
+    case(ALUControl)
+        3'b000: Result = a + b; //add
+        3'b001: Result = a - b; //sub
+        3'b010: Result = a & b; //and
+        3'b011: Result = a | b; //or
+        3'b100: Result = a << b[4:0]; //sll
+        
+        
+        
+        3'b101: case (funct3_bit)
+
+            1'b0:begin//slt
+                if(a[31]!= b[31]) Result = a[31] ?1:0; 
+                else Result = (a < b) ? 1:0;
+            end 
+            1'b1: Result <= (a < {20'b0, b[11:0]}) ? 1 : 0; //sltu
+                endcase
+                
+                
+        3'b110: begin
+            if(funct7bit6) Result = a >> b[4:0]; //srl
+            else Result = a >>> b[4:0]; //sra
+        end
+        
+        
+        
+        3'b111: Result = a ^ b; //xor
+        default: Result = 32'b0;
+        endcase
+end
+
+assign Zero = (Result == 0)?1:0;
+
+endmodule
+
+/*
 module alu(a,b,ALUcontrol,result,zero,negative,overflow,carry);
     input [31:0] a,b;       //two 32-bit inputs (operands)
     input [2:0] ALUcontrol; //control signals to determine the operation required 
@@ -103,3 +150,4 @@ module alu(a,b,ALUcontrol,result,zero,negative,overflow,carry);
                       
     
 endmodule
+*/
