@@ -1,79 +1,110 @@
+`timescale 1ns / 1ps
+//////////////////////////////////////////////////////////////////////////////////
+// Company: 
+// Engineer: 
+// 
+// Create Date: 06/11/2025 10:54:35 AM
+// Design Name: 
+// Module Name: datapath
+// Project Name: 
+// Target Devices: 
+// Tool Versions: 
+// Description: 
+// 
+// Dependencies: 
+// 
+// Revision:
+// Revision 0.01 - File Created
+// Additional Comments:
+// 
+//////////////////////////////////////////////////////////////////////////////////
 
-module datapath(
-    input         clk, reset,                     // Clock and reset for sequential logic
+
+module datapath(clk,reset,ResultSrcW,PCJalSrcE,PCSrcE,ALUSrcAE,ALUSrcBE,RegWriteW,ImmSrcD,ALUControlE,
+                          Zero_E,Sign_E,PCF,Instr_F,Instr_D,ALUResultM,WriteDataM,ReadDataM,ForwardAE,
+                          ForwardBE,rs1_D,rs2_D,rs1_E,rs2_E,rd_E,rd_M,rd_W,Stall_D,Stall_F,Flush_D,Flush_E,ResultW);
+                          
+    input clk;
+    input reset;
+    input [1:0] ResultSrcW;
+    input PCJalSrcE;
+    input PCSrcE;
+    input ALUSrcAE;
+    input [1:0] ALUSrcBE;
+    input RegWriteW;
+    input [2:0] ImmSrcD;
+    input [3:0] ALUControlE;
+    input [31:0] Instr_F;
+    input [31:0] ReadDataM;
+    input [1:0] ForwardAE;
+    input [1:0] ForwardBE;
+    input Stall_D;
+    input Stall_F;
+    input Flush_D;
+    input Flush_E;
     
-    input [1:0]   ResultSrc,                      // Selects the data to write back to register file (mux4)
-    input         PCSrc,                          // Chooses between PC+4 or branch target address (from branch decision)
-    input         ALUSrc,                         // Chooses second ALU input: from register or immediate
-    input         RegWrite,                       // Enables register write-back
-    input [1:0]   ImmSrc,                         // Selects immediate format: I, S, B, J (for imm_extend)
-    input [2:0]   ALUControl,                     // Selects the ALU operation
-    input         jalr,                           // Enables jalr (register-indirect jump)
+    
+    output Zero_E;
+    output Sign_E;
+    output [31:0] PCF;
+    output [31:0] Instr_D;
+    output [31:0] ALUResultM;
+    output [31:0] WriteDataM;
+    output [4:0] rs1_D, rs2_D, rs1_E, rs2_E;
+    output [4:0] rd_E, rd_M, rd_W;
+    output [31:0] ResultW;
+    
+    wire [31:0] PCD, PCE,ALUResultE,ALUResultM,ReadDataM,ReadDataW;
+    wire [31:0] PCNextF,PCplus4F,PCplus4D,PCplus4E,PCplus4M,PCplus4W,PCTargetE,JumpTargetE;
+    wire [31:0] WriteDataE;
+    wire [31:0] ImmExtD;
+    wire [31:0] ImmExtE;
+    wire [31:0] SrcAEfor,SrcAE,SrcBE,RD1_D,RD2_D,RD1_E,RD2_E;
+    wire [31:0] ResultW;
+    wire [4:0] rd_D;
+    
+    //Instruction Fetch Stage
+    mux_2_1 jalr(PCTargetE,ALUResultE,PCJalSrcE,JumpTargetE);
+    pc_mux pcmux(PCplus4F,JumpTargetE,PCSrcE,PCNextF);
+    reset_ff pcSel(clk,reset,PCNextF,PCF,~Stall_F);
+    adder pcadd4(PCF,32'd4,PCplus4F);
+    
+    //instruction_memory im(PCF,Instr_F);
+    
+    //Instruction Fetch_Instruction Decode register
+    if_id_reg pipefd(clk,reset,Flush_D,~Stall_D,Instr_F,PCF,PCPlus4F,
+                                                Instr_D,PCD,PCplus4D);
+    assign rs1_D = Instr_D[19:15];
+    assign rs2_D = Instr_D[24:20];
+    
+    reg_file r(clk, RegWriteW, rs1_D,rs2_D,rd_W,ResultW,rd1_D,rd2_D);
+    
+    assign rd_D = Instr_D[11:7];
+    
+    immediate_extend im_ext(Instr_D[31:7],ImmSrcD,ImmExtD);
+    
+    //Instruction Decode_ Instruction_Execute register
+    id_ex_reg pipeidex(clk,reset,Flush_E,RD1_D,RD2_D,PCD,rs1_D,rs2_D,rd_D,ImmExtD,PCplus4D,
+                                       RD1_E,RD2_E,PCE,rs1_E,rs2_E,rd_E,ImmExtE,PCplus4E);
+    
+    forward_Amux forwardmuxA(RD1_E,ResultW,ALUResultM,ForwardAE,SrcAEfor);
+    mux_2_1 srcAmux(SrcAEfor,32'b0,ALUSrcAE,SrcAE);
+    forward_Bmux forwardmuxB(RD2_E,ResultW,ALUResultM,ForwardBE,WriteDataE);
+    mux_3_1 srcBmux(WriteDataE,ImmExtE,PCTargetE,ALUSrcBE,SrcBE);
+    adder pcadder(PCE,ImmExtE,PCTargetE); //next PC for jump and branch instructions
+    
+    alu al(SrcAE,SrcBE,ALUControlE,ALUResultE,Zero_E,Sign_E);
+    
+    //Instruction Execute_Memory Access register
+    ex_mem_reg pipeexmem(clk,reset,ALUResultE,WriteDataE,rd_E,PCplus4E,
+                                   ALUResultM,WriteDataM,rd_M,PCplus4M);
 
-
-
-    input  [31:0] Instr,                          // Current instruction from instruction memory
-    input  [31:0] ReadData,                       // Data read from memory
-
-    output        Zero,                           // ALU output == 0 flag (for branch decision)
-    output        ALUbit31,                       // MSB of ALU result (used for signed comparisons)
-    output [31:0] PC,                             // Current program counter value 
-    output [31:0] Mem_WrAddr,                     // Memory address to write (from ALU)
-    output [31:0] Mem_WrData,                     // Memory data to write (from register)
-    output [31:0] Result, SrcA, SrcB              // ALU output or write-back data, ALU operands
-);
-
-// Internal wires
-wire [31:0] PCPlus4, PCTarget, PCNext, WriteData, ImmExt, ALUResult;
-wire [31:0] Auipc, lAuipc, rs1, rs2, rd, PCjalr;
-
-// Choose next PC: either PC+4 or branch/jump target
-mux_2to1 pc_mux(PCPlus4, PCTarget, PCSrc, PCNext);           
-
-// Choose between normal PC (PCNext) or jalr (ALUResult) target
-mux_2to1 jalr_mux(PCNext, ALUResult, jalr, PCjalr);           
-
-// Program Counter register with reset
-reset_flipflop pc_ff(clk, reset, PCjalr, PC);                   
-
-// PC + 4 (next instruction address)
-adder_32bit pc_add_4(PC, 32'd4, PCPlus4);                        
-
-// Register file: read rs1, rs2; write rd with `Result` if RegWrite is enabled
-reg_file rfile(clk, RegWrite, rs1, rs2, rd, Result, SrcA, WriteData);
-
-// Immediate extension: extract immediate from instruction using ImmSrc
-immediate_extend immediate(Instr[31:7], ImmSrc, ImmExt);             
-
-// Branch/jump target = PC + offset
-adder_32bit pc_add_branch(PC, ImmExt, PCTarget);                
-
-// Select second ALU input: register or immediate
-mux_2to1 srcb_mux(WriteData, ImmExt, ALUSrc, SrcB);           
-
-// ALU operation
-alu ALU(SrcA, SrcB, ALUControl, ALUResult, Zero, Instr[30], Instr[12]);
-
-// AUIPC target = PC + upper immediate
-adder_32bit auipc_adder({Instr[31:12], 12'b0}, PC, Auipc);      
-
-// Choose between LUI immediate and AUIPC result (for mux_4to1)
-mux_2to1 luipc_mux({Instr[31:12], 12'b0}, Auipc, Instr[5], lAuipc);
-
-// Final result selection for register write-back
-// ALUResult, ReadData (from mem), PC+4, or lAuipc
-mux_4to1 Result_mux(ALUResult, ReadData, PCPlus4, lAuipc, ResultSrc, Result);
-
-// Assign memory interface signals
-assign Mem_WrAddr = ALUResult;         // Address comes from ALU
-assign Mem_WrData = WriteData;         // Data to write comes from rs2
-
-// ALUbit31 is MSB of ALUResult (used for slt/bge comparisons)
-assign ALUbit31 = ALUResult[31];
-
-// Decode register numbers from instruction
-assign rs1 = Instr[19:15];             // rs1 register number
-assign rs2 = Instr[24:20];             // rs2 register number
-assign rd  = Instr[11:7];              // rd destination register
-
+    //data_memory dm(clk, MemWriteM,ALUResultM,WriteDataM,ReadDataM);
+    
+    //Memory Access_Write Back register
+    mem_wb_reg pipememwb(clk,reset,ALUResultM,ReadDataM,rd_M,PCplus4M,
+                                   ALUResultW,ReadDataW,rd_W,PCplus4W);
+                                   
+    wb_mux wr(ALUResultW,ReadDataW,PCplus4W,ResultSrcW,ResultW); 
+                                 
 endmodule

@@ -1,31 +1,93 @@
+`timescale 1ns / 1ps
+//////////////////////////////////////////////////////////////////////////////////
+// Company: 
+// Engineer: 
+// 
+// Create Date: 06/10/2025 11:17:43 PM
+// Design Name: 
+// Module Name: controller
+// Project Name: 
+// Target Devices: 
+// Tool Versions: 
+// Description: 
+// 
+// Dependencies: 
+// 
+// Revision:
+// Revision 0.01 - File Created
+// Additional Comments:
+// 
+//////////////////////////////////////////////////////////////////////////////////
 
-module controller (
-    input  [6:0] opcode,         // opcode
-    input  [2:0] funct3,     // funct3 field (instruction type info)
-    input        funct7bit5,   // funct7[5] (for ALU control, for example, add/sub)
-    input        Zero,       // ALU output == 0 (used for branches)
-    input        ALUbit31,     // ALU result MSB (used for signed comparisons)
+
+module controller(clk,reset,opcode,funct3,funct7bit5,Zero_E,Sign_E,Flush_E,
+                  ResultSrcE0,ResultSrcW,MemWriteM,PCJalSrcE,PCSrcE,
+                  ALUSrcAE,ALUSrcBE,RegWriteM,RegWriteW,ImmSrcD,ALUControlE);
+                  
+    input clk;                 //clock input
+    input reset;               //active high reset pin
+    input [6:0] opcode;        //7 bit opcode
+    input [2:0] funct3;        //3 bit funct3 
+    input funct7bit5;          //5th bit of funct7
+    input Zero_E;              //Zero result of ALU in EX stage
+    input Sign_E;              //Sign result of ALU in EX stage
+    input Flush_E;             //Used to flush the pipeline
     
-    output [1:0] ResultSrc,  // selects ALU/memory/PC+4 result
-    output       MemWrite,   // enable memory write
-    output       PCSrc,      // select source of next PC (branch/jump)
-    output       ALUSrc,     // ALU second operand: register vs immediate
-    output       RegWrite,   // enable register write
-    output       Jump,       // instruction is `jal`
-    output       jalr,       // instruction is `jalr`
-    output [1:0] ImmSrc,     // selects immediate type (I, S, B, etc.)
-    output [2:0] ALUControl  // final ALU operation selector
-);
+    output ResultSrcE0;        //LSB bit of ResultSrcE control signal
+    output [1:0] ResultSrcW;   //2 bit ResultSrcW control signal
+    output MemWriteM;          //sends signal to data_memory as write_enable
+    output PCJalSrcE;          //sends signals to PC Jal mux
+    output PCSrcE;             //sends signals to PC mux
+    output ALUSrcAE;           //select operand 1 source (rs1 or PC)
+    output [1:0] ALUSrcBE;     //select operand 2 source (rs2 or imm or +4 or any-other)
+    output RegWriteM;          //control signal to control write operation in reg_file (M)
+    output RegWriteW;          //control signal to control write operation in reg_file (W)
+    output [2:0] ImmSrcD;      //immediate source selector
+    output [3:0] ALUControlE;  //controls which ALU operation to perform 
+    
+    wire [1:0] ALUOpD;          // ALU operation type from main_decoder to alu_decoder
+    
+    wire [1:0] ResultSrcD;     //2 bit ResultSrcD control signal
+    wire [1:0] ResultSrcE;     //2 bit ResultSrcE control signal
+    wire [1:0] ResultSrcM;     //2 bit ResultSrcM control signal
+    
+    wire RegWriteD;            //control signals to control write operation in reg_file (D) 
+    wire RegWriteE;            //control signals to control write operation in reg_file (D) 
 
-	 
-wire [1:0] ALUOp;
-wire       Branch;
+    wire [3:0] ALUControlD;    //controls which ALU operation to perform
+    wire ALUSrcAD;
+    
+    wire BranchD, BranchE;     //branch control conditions based on funct3
+    wire MemWriteD, MemWriteE; //sends signal to data_memory as write_enable
+    wire JumpD, JumpE;         //used in pc_mux for jump interrupts
+    wire [1:0] ALUSrcBD;       //select operand 2 source (rs2 or imm or +4 or any-other)
+  
+    wire SignOp;               //sign flag for branch logic
+    wire BranchOp;             //only beq / no branch 
+    wire ZeroOp;
+    
+    //main decoder
+    main_decoder m(opcode,ALUOpD,ALUSrcAD,ALUSrcBD,RegWriteD,MemWriteD,ResultSrcD,BranchD,JumpD,ImmSrcD);
+    
+    //alu decoder
+    alu_decoder  a(opcode[5],funct3,funct7bit5,ALUOpD,ALUControlD);
+    
+    id_ex_reg_ctrl  pipe0(clk,reset,Flush_E,RegWriteD,MemWriteD,JumpD,BranchD,ALUSrcAD,ALUSrcBD,ResultSrcD,ALUControlD,
+                                            RegWriteE,MemWriteE,JumpE,BranchE,ALUSrcAE,ALUSrcBE,ResultSrcE,ALUControlE);
+    
+    assign ResultSrcE0 = ResultSrcE[0];
+    
+    ex_mem_reg_ctrl pipe1(clk,reset,RegWriteE,MemWriteE,ResultSrcE,
+                                    RegWriteM,MemWriteM,ResultSrcM);
+                               
+    mem_wb_reg_ctrl pipe2(clk,reset,RegWriteM,MemWriteM,ResultSrcM,
+                                    RegWriteW,MemWriteW,ResultSrcW);
+    
+    assign ZeroOp = Zero_E ^ funct3[0]; //complements Zero flag for bne instruction
+    assign SignOp = Sign_E ^ funct3[0]; //complements Zero flag for bge instruction
+    
+    assign BranchOp = funct3[2] ? (SignOp) : (ZeroOp);
+    assign PCSrcE = (BranchE & BranchOp) | JumpE;
+    assign PCJalSrcE = JumpE; //(opcode == 7'b1100111) ? 1'b1 : 1'b0;  //jalr instruction
 
-main_decoder    md (opcode, funct3,Zero,ALUbit31,ResultSrc, MemWrite, Branch,
-                    ALUSrc, RegWrite, Jump,jalr, ImmSrc, ALUOp);
-
-alu_decoder     ad (opcode[5], funct3, funct7bit5, ALUOp, ALUControl);
-
-
-assign PCSrc = Branch | Jump;
 endmodule
